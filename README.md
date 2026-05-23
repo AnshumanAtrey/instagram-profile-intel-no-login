@@ -1,5 +1,8 @@
 # Instagram Profile Intel — No Login · Bio Emails · 25+ Fields
 
+📦 **Open source · MIT:** [github.com/AnshumanAtrey/instagram-profile-intel-no-login](https://github.com/AnshumanAtrey/instagram-profile-intel-no-login)
+
+
 **No Instagram login required. No cookies. No auth. No friction.** Drop in usernames. Get back 25+ structured intel layers per profile in one call.
 
 Built for B2B sales teams, influencer-marketing agencies, lead-gen consultants, recruiters, brand-safety analysts, and competitive intelligence researchers.
