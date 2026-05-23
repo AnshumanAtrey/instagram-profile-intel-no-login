@@ -1,0 +1,17 @@
+{
+    "actorSpecification": 1,
+    "name": "instagram-profile-intel-no-login",
+    "title": "Instagram Profile Intel — No Login, Bio Emails & 25+ Fields",
+    "description": "No login, no cookies. Instagram profile scraper for B2B lead generation. Bio emails (MX-validated), phones, multi-link bios, engagement quality, account age, posting patterns, cross-platform check (8 platforms), tech stack, niche. 25+ structured fields per username.",
+    "version": "1.1",
+    "buildTag": "latest",
+    "meta": {
+        "templateId": "js-empty"
+    },
+    "input": "./INPUT_SCHEMA.json",
+    "dockerfile": "../Dockerfile",
+    "storages": {
+        "dataset": "./output_schema.json"
+    },
+    "categories": ["SOCIAL_MEDIA", "LEAD_GENERATION", "AUTOMATION"]
+}

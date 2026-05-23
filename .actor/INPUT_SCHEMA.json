@@ -1,0 +1,102 @@
+{
+    "title": "Instagram Profile Intel",
+    "description": "Enter Instagram usernames. Get 25+ layers of intel per profile — bio emails (MX-verified), phones, multi-link bios, engagement quality, account age, posting patterns, hashtag campaigns, top/worst posts, cross-platform presence (8 platforms), tech stack of their website, pincode, country code, bio link health, profile pic metadata, and more. No Instagram login required.",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "usernames": {
+            "title": "Instagram usernames",
+            "type": "array",
+            "description": "List of Instagram usernames to analyze (without the @ symbol). Examples: 'zomato', 'biryanibykilo', 'plumgoodness'. Or paste full Instagram URLs — we auto-extract the username.",
+            "editor": "stringList",
+            "prefill": ["biryanibykilo", "plumgoodness", "shaadiwish"],
+            "uniqueItems": true,
+            "minItems": 1,
+            "maxItems": 1000
+        },
+        "enrichLevel": {
+            "title": "Enrichment level",
+            "type": "string",
+            "description": "Basic = profile + bio contacts + account age + IG capabilities. Full = adds engagement scoring, posting pattern, communication style, hashtag campaigns, top/worst posts, collabs, niche detection.",
+            "editor": "select",
+            "default": "full",
+            "enum": ["basic", "full"],
+            "enumTitles": [
+                "Basic — identity + counts + bio contacts + account age + IG capabilities",
+                "Full — adds engagement + posting + style + hashtag campaigns + top posts + collabs (recommended)"
+            ]
+        },
+        "checkCrossPlatform": {
+            "title": "Check cross-platform username presence (8 platforms)",
+            "type": "boolean",
+            "description": "Detect if the same username exists on Threads, GitHub, Reddit, YouTube, Pinterest, Spotify, Twitter/X, Facebook. Adds ~3-8 seconds per profile.",
+            "editor": "checkbox",
+            "default": true,
+            "sectionCaption": "Network enrichments",
+            "sectionDescription": "Toggle individual enrichments. Disable to speed up runs."
+        },
+        "enrichExternalUrl": {
+            "title": "Fetch external URL og:metadata + emails/phones + tech stack",
+            "type": "boolean",
+            "description": "For each profile's external URL, fetch og:title/description/image, extra emails/phones from the website body, and detect tech stack (Shopify, Wix, Stripe, etc.). Adds ~1-3 sec per profile.",
+            "editor": "checkbox",
+            "default": true
+        },
+        "expandMultiLinkBio": {
+            "title": "Expand multi-link bios (linktr.ee, beacons.ai, bio.link, etc.)",
+            "type": "boolean",
+            "description": "When the external URL is a multi-link bio service, fetch the page and extract all child links. Adds ~1-2 sec per profile (only when applicable).",
+            "editor": "checkbox",
+            "default": true
+        },
+        "validateEmailsViaMx": {
+            "title": "MX-validate extracted emails (DNS check)",
+            "type": "boolean",
+            "description": "For each email extracted from the bio, run a DNS MX lookup to verify the domain accepts email. Free, fast, no extra HTTP — uses DNS. Catches typos and fake domains.",
+            "editor": "checkbox",
+            "default": true
+        },
+        "checkBioLinkHealth": {
+            "title": "Health-check bio links (200 vs 404)",
+            "type": "boolean",
+            "description": "HEAD each bio_link URL to detect dead/broken links. Useful for finding accounts with abandoned link trees. Adds ~1-2 sec per profile.",
+            "editor": "checkbox",
+            "default": true
+        },
+        "fetchProfilePicMeta": {
+            "title": "Fetch profile picture metadata (size, type)",
+            "type": "boolean",
+            "description": "HEAD the profile picture URL to get dimensions, content-type, file size. Adds ~0.5 sec per profile.",
+            "editor": "checkbox",
+            "default": true
+        },
+        "useResidentialProxy": {
+            "title": "Use Apify Residential Proxy",
+            "type": "boolean",
+            "description": "Recommended ON. Rotates residential IPs to avoid Instagram + cross-platform rate limits. Turn off only if you have your own IP rotation set up.",
+            "editor": "checkbox",
+            "default": true,
+            "sectionCaption": "Networking",
+            "sectionDescription": "Proxy + delay + retry settings."
+        },
+        "requestDelayMs": {
+            "title": "Delay between profiles (ms)",
+            "type": "integer",
+            "description": "Polite delay between Instagram profile calls. Default 1500ms balances speed vs rate-limit safety. Lower = faster but more likely to hit 429.",
+            "editor": "number",
+            "default": 1500,
+            "minimum": 500,
+            "maximum": 10000
+        },
+        "maxRetries": {
+            "title": "Max retries per username",
+            "type": "integer",
+            "description": "How many times to retry a failed request before giving up on that username.",
+            "editor": "number",
+            "default": 3,
+            "minimum": 1,
+            "maximum": 10
+        }
+    },
+    "required": ["usernames"]
+}

@@ -1,0 +1,66 @@
+{
+    "actorSpecification": 1,
+    "fields": {},
+    "views": {
+        "profiles": {
+            "title": "Profiles with full intel",
+            "description": "One row per username with bio contacts, account age, engagement, cross-platform presence, and niche",
+            "transformation": {
+                "fields": [
+                    "recordType",
+                    "username",
+                    "fullName",
+                    "category",
+                    "detectedNiche",
+                    "followerCount",
+                    "accountAge.estimatedJoinDate",
+                    "accountAge.ageBucket",
+                    "engagement.engagementRate",
+                    "engagement.engagementQuality",
+                    "engagement.postingFrequency.isActive",
+                    "postingPattern.modalDayOfWeek",
+                    "postingPattern.modalHourIST",
+                    "communicationStyle.bioLanguages",
+                    "hashtagPattern.brandedHashtag",
+                    "extractedFromBio.emails",
+                    "extractedFromBio.phones",
+                    "extractedFromBio.whatsappLinks",
+                    "externalUrl",
+                    "multiLinkExpanded.childLinkCount",
+                    "crossPlatform",
+                    "isBusinessAccount",
+                    "isVerified",
+                    "profileUrl"
+                ],
+                "flatten": ["accountAge", "engagement", "postingPattern", "communicationStyle", "hashtagPattern", "extractedFromBio", "multiLinkExpanded"]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "username": {"label": "Username", "format": "text"},
+                    "fullName": {"label": "Name", "format": "text"},
+                    "category": {"label": "Category", "format": "text"},
+                    "detectedNiche": {"label": "Niche", "format": "text"},
+                    "followerCount": {"label": "Followers", "format": "number"},
+                    "accountAge.estimatedJoinDate": {"label": "Joined", "format": "text"},
+                    "accountAge.ageBucket": {"label": "Age", "format": "text"},
+                    "engagement.engagementRate": {"label": "Eng. Rate", "format": "number"},
+                    "engagement.engagementQuality": {"label": "Eng. Quality", "format": "text"},
+                    "engagement.postingFrequency.isActive": {"label": "Active?", "format": "boolean"},
+                    "postingPattern.modalDayOfWeek": {"label": "Posts On", "format": "text"},
+                    "postingPattern.modalHourIST": {"label": "Hour (IST)", "format": "number"},
+                    "communicationStyle.bioLanguages": {"label": "Languages", "format": "array"},
+                    "hashtagPattern.brandedHashtag": {"label": "Branded #", "format": "text"},
+                    "extractedFromBio.emails": {"label": "Bio Emails", "format": "array"},
+                    "extractedFromBio.phones": {"label": "Bio Phones", "format": "array"},
+                    "extractedFromBio.whatsappLinks": {"label": "WhatsApp", "format": "array"},
+                    "externalUrl": {"label": "Website", "format": "link"},
+                    "multiLinkExpanded.childLinkCount": {"label": "MultiLink #", "format": "number"},
+                    "isBusinessAccount": {"label": "Business?", "format": "boolean"},
+                    "isVerified": {"label": "Verified?", "format": "boolean"},
+                    "profileUrl": {"label": "IG Link", "format": "link"}
+                }
+            }
+        }
+    }
+}

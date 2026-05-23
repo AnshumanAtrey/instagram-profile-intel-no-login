@@ -1,0 +1,17 @@
+# Apify build artifacts
+.actor/storage/
+apify_storage/
+crawlee_storage/
+
+# Node
+node_modules/
+npm-debug.log
+
+# Dev
+.env
+.env.*
+*.swp
+.DS_Store
+
+# Docs that don't need to be in the image
+RESEARCH.md
