@@ -3,7 +3,7 @@
     "name": "instagram-profile-intel-no-login",
     "title": "Instagram Profile Intel \u2014 No Login, Bio Emails & 25+ Fields",
     "description": "Instagram profile scraper for B2B lead gen and OSINT. Runs anonymous by default; paste your own Instagram sessionid for reliable results. Bio emails (MX-validated), phones, multi-link bios, engagement quality, account age, posting patterns, cross-platform check (8 platforms), tech stack, niche. 25+ fields per username. You are only charged for profiles actually delivered.",
-    "version": "1.5",
+    "version": "1.6",
     "buildTag": "latest",
     "meta": {
         "templateId": "js-empty"

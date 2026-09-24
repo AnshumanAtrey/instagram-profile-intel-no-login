@@ -823,48 +823,14 @@ function compactPosts(user) {
 // ────────────────────────────────────────────────────────────────────
 // Instagram fetch + retry
 // ────────────────────────────────────────────────────────────────────
-const IG_APP_ID = '936619743392459';
-const DESKTOP_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+const DESKTOP_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
 // Origin is overridable only for local end-to-end tests (a mock server); defaults to the
 // real site in every real run. Nothing but a test harness ever sets IG_BASE_URL.
 const IG_ORIGIN = process.env.IG_BASE_URL || 'https://www.instagram.com';
 
-// A logged-out browser hits the homepage first — Instagram sets csrftoken / mid / ig_did
-// there — and then calls the profile API carrying those cookies from the same IP. Skipping
-// this is why bare API calls now get the anonymous-access gate. Cached per proxy session.
-async function guestSession(proxyUrl) {
-    try {
-        const res = await withTimeout(gotScraping({
-            url: `${IG_ORIGIN}/`,
-            proxyUrl,
-            headers: { 'User-Agent': DESKTOP_UA, Accept: 'text/html', 'Accept-Language': 'en-US,en;q=0.9' },
-            timeout: { request: 12000 },
-            throwHttpErrors: false,
-            retry: { limit: 0 },
-        }), 15000, 'guestSession');
-        const jar = {};
-        for (const c of [].concat(res.headers['set-cookie'] || [])) {
-            const kv = c.split(';')[0];
-            const eq = kv.indexOf('=');
-            if (eq > 0) jar[kv.slice(0, eq).trim()] = kv.slice(eq + 1).trim();
-        }
-        return jar;
-    } catch {
-        return {};
-    }
-}
-
-// Instagram's anonymous-access gate: 401 {"require_login":true,...}. Not a missing profile,
-// not our bug — the request was refused before any data. Charging for these is the defect.
-function isGate(response) {
-    return response.statusCode === 401
-        || response.statusCode === 403
-        || (typeof response.body === 'object' && response.body?.require_login === true);
-}
-
 // Turn a user-supplied session into a cookie map. Accepts either a bare `sessionid` value
-// or a full copied cookie string ("sessionid=...; csrftoken=...; ds_user_id=..."). The
-// sessionid is what authenticates the request AS THAT USER — it is never logged.
+// or a full copied cookie string ("sessionid=...; csrftoken=...; ds_user_id=..."). Optional:
+// with it the browser runs logged in (posts + private-followed become visible). Never logged.
 function parseSessionCookie(raw) {
     const s = (raw || '').toString().trim();
     if (!s) return null;
@@ -877,70 +843,131 @@ function parseSessionCookie(raw) {
     return jar.sessionid ? jar : null;
 }
 
-async function fetchProfile(username, { proxyConfig, requestDelayMs, maxRetries, sessionCookie, runProxySession }) {
-    const url = `${IG_ORIGIN}/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`;
-    const authCookies = parseSessionCookie(sessionCookie); // the user's own session, or null
-    const authenticated = !!authCookies;
+// ── Browser-based profile fetch ──────────────────────────────────────
+// Instagram's private JSON API (web_profile_info) now 401s for anonymous callers even from a
+// real browser. But the public profile PAGE still renders, and its rich profile JSON is
+// embedded in <script type="application/json"> blocks — which is what the working scrapers
+// read. We load the page in a real (fingerprinted) Chromium and extract that JSON, then adapt
+// it to the web_profile_info shape the enrichment already consumes. Posts are not exposed to a
+// logged-out browser, so post-derived enrichment is empty unless a sessionCookie is supplied.
+
+// Parse follower/following/post counts out of the og:description meta as a supplement — the
+// embedded block carries exact follower/following but not always the post count.
+function parseOgCounts(desc) {
+    if (!desc) return {};
+    const num = (s) => {
+        if (!s) return null;
+        const m = s.trim().replace(/,/g, '').match(/^([\d.]+)\s*([KMB])?/i);
+        if (!m) return null;
+        let n = parseFloat(m[1]);
+        const suf = (m[2] || '').toUpperCase();
+        if (suf === 'K') n *= 1e3; else if (suf === 'M') n *= 1e6; else if (suf === 'B') n *= 1e9;
+        return Math.round(n);
+    };
+    return {
+        followers: num(desc.match(/([\d.,]+[KMB]?)\s+Followers/i)?.[1]),
+        following: num(desc.match(/([\d.,]+[KMB]?)\s+Following/i)?.[1]),
+        posts: num(desc.match(/([\d.,]+[KMB]?)\s+Posts/i)?.[1]),
+    };
+}
+
+// Reshape Instagram's embedded profile object (newer follower_count/pk schema) into the
+// web_profile_info shape the rest of the actor expects (edge_followed_by.count, etc.).
+function adaptUser(o, og = {}) {
+    if (!o || !o.username) return null;
+    const links = (o.bio_links || []).map((b) => ({ url: b.url || '', title: b.title || '', link_type: b.link_type || 'external' })).filter((b) => b.url);
+    return {
+        id: String(o.pk || o.id || ''),
+        username: o.username,
+        full_name: o.full_name || '',
+        biography: o.biography || '',
+        edge_followed_by: { count: o.follower_count ?? o.edge_followed_by?.count ?? og.followers ?? 0 },
+        edge_follow: { count: o.following_count ?? o.edge_follow?.count ?? og.following ?? 0 },
+        edge_owner_to_timeline_media: { count: o.all_media_count ?? o.media_count ?? og.posts ?? 0, edges: [] },
+        bio_links: links,
+        external_url: o.external_url || links[0]?.url || null,
+        is_private: !!o.is_private,
+        is_verified: !!o.is_verified,
+        is_business_account: !!(o.is_business || o.is_business_account),
+        is_professional_account: !!o.is_professional_account,
+        category_name: o.category || o.category_name || null,
+        profile_pic_url: o.profile_pic_url || o.profile_pic || null,
+        profile_pic_url_hd: o.profile_pic_url_hd || o.profile_pic_url || o.profile_pic || null,
+        pronouns: o.pronouns || [],
+    };
+}
+
+// Walk every embedded JSON block for the profile's user object (biggest match wins).
+function extractUserFromScripts(scriptTexts, uname) {
+    let best = null;
+    const walk = (o, d) => {
+        if (d > 16 || !o || typeof o !== 'object') return;
+        const isUser = (o.username === uname || typeof o.biography === 'string')
+            && (o.follower_count !== undefined || o.edge_followed_by !== undefined || o.biography !== undefined);
+        if (isUser && (!best || Object.keys(o).length > Object.keys(best).length)) best = o;
+        for (const k in o) { try { walk(o[k], d + 1); } catch { /* cyclic/getter */ } }
+    };
+    for (const t of scriptTexts) { try { walk(JSON.parse(t), 0); } catch { /* not JSON */ } }
+    return best;
+}
+
+async function launchProfileBrowser({ proxyConfig, runProxySession, sessionCookie }) {
+    const { chromium } = await import('playwright');
+    const launchOptions = { headless: true, args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'] };
+    if (process.env.IG_CHROMIUM_PATH) launchOptions.executablePath = process.env.IG_CHROMIUM_PATH; // local test via Edge/Brave
+    if (proxyConfig) {
+        // One sticky proxy IP for the whole browser session — a browser must not hop IPs mid-session.
+        const proxyUrl = await proxyConfig.newUrl(runProxySession);
+        if (proxyUrl) {
+            const u = new URL(proxyUrl);
+            launchOptions.proxy = { server: `${u.protocol}//${u.host}`, username: decodeURIComponent(u.username), password: decodeURIComponent(u.password) };
+        }
+    }
+    const browser = await chromium.launch(launchOptions);
+    const context = await browser.newContext({ userAgent: DESKTOP_UA, locale: 'en-US', viewport: { width: 1280, height: 800 } });
+    const auth = parseSessionCookie(sessionCookie);
+    if (auth) {
+        await context.addCookies(Object.entries(auth).map(([name, value]) => ({ name, value, domain: '.instagram.com', path: '/' })));
+    }
+    return { browser, context, authenticated: !!auth };
+}
+
+async function fetchProfileBrowser(context, username, { maxRetries, requestDelayMs }) {
     let lastError = null;
-    let gatedHits = 0;
+    let sawWall = false;
     for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+        const page = await context.newPage();
         try {
-            // Authenticated: ONE sticky IP for the whole run. A logged-in account that hops
-            // residential IPs every request looks hijacked and gets throttled (429) — the exact
-            // failure a first test showed. Anonymous: rotate the IP each attempt to dodge the
-            // per-IP anonymous gate.
-            const proxySession = authenticated ? runProxySession : safeSessionId(`ig${attempt}`, username);
-            const proxyUrl = proxyConfig ? await proxyConfig.newUrl(proxySession) : undefined;
-            // Authenticated GET carries only the session cookie — no homepage bootstrap, which
-            // just doubles the request rate and worsens throttling. Anonymous needs a guest
-            // csrftoken/mid from the homepage.
-            const cookies = authenticated ? authCookies : await guestSession(proxyUrl);
-            const csrf = cookies.csrftoken;
-            const headers = {
-                'User-Agent': DESKTOP_UA,
-                'x-ig-app-id': IG_APP_ID,
-                Accept: '*/*',
-                'Accept-Language': 'en-US,en;q=0.9',
-                Referer: `https://www.instagram.com/${username}/`,
-                'X-Requested-With': 'XMLHttpRequest',
-                ...(csrf ? { 'x-csrftoken': csrf } : {}),
-                ...(Object.keys(cookies).length
-                    ? { Cookie: Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ') }
-                    : {}),
-            };
-            const response = await withTimeout(
-                gotScraping({ url, headers, proxyUrl, responseType: 'json', timeout: { request: 12000, connect: 5000, response: 8000 }, throwHttpErrors: false, retry: { limit: 0 } }),
-                15000,
-                'fetchProfile',
-            );
-            if (response.statusCode === 200 && response.body?.data?.user) return { ok: true, user: response.body.data.user };
-            if (response.statusCode === 404) return { ok: false, status: 'not_found', error: 'Username does not exist on Instagram' };
-            if (isGate(response)) {
-                gatedHits += 1;
-                // With a session supplied, a gate means the cookie was rejected — expired or
-                // invalid — not the anonymous rate-limit. Say so, so the user knows to refresh it.
-                lastError = authCookies
-                    ? `Session cookie rejected by Instagram (HTTP ${response.statusCode}) — it is likely expired or invalid. Get a fresh sessionid and try again.`
-                    : `Instagram anonymous-access gate (HTTP ${response.statusCode}) — no session provided. Paste a sessionid for reliable results.`;
-                return { ok: false, status: authCookies ? 'auth_failed' : 'blocked', error: lastError, gated: true };
+            const resp = await page.goto(`${IG_ORIGIN}/${encodeURIComponent(username)}/`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            const status = resp?.status();
+            if (status === 404) return { ok: false, status: 'not_found', error: 'Username does not exist on Instagram' };
+            await page.waitForTimeout(1500);
+            const scripts = await page.$$eval('script[type="application/json"]', (els) => els.map((e) => e.textContent || ''));
+            const og = await page.evaluate(() => document.querySelector('meta[property="og:description"]')?.content || '');
+            const raw = extractUserFromScripts(scripts, username);
+            if (raw) {
+                const user = adaptUser(raw, parseOgCounts(og));
+                if (user) return { ok: true, user };
             }
-            if (response.statusCode === 429) {
-                // Exponential backoff, capped. On an authenticated run 429 means "slow down",
-                // not "blocked" — the session is valid, the pace is too high.
-                const backoff = Math.min(20000, requestDelayMs * 2 ** attempt);
-                lastError = `Rate limited (429)${authenticated ? ' — session valid, Instagram is throttling the request pace' : ''} on attempt ${attempt}`;
-                log.warning(`[${username}] ${lastError} — backing off ${backoff}ms`);
-                await sleep(backoff);
-                continue;
+            const pageText = (await page.evaluate(() => (document.body?.innerText || '').slice(0, 400))) || '';
+            if (/isn't available|Sorry, this page|page isn't available|Page Not Found/i.test(pageText)) {
+                return { ok: false, status: 'not_found', error: 'Username does not exist on Instagram' };
             }
-            lastError = `HTTP ${response.statusCode}`;
+            if (/log in|sign up|challenge|checkpoint|confirm it'?s you/i.test(pageText)) {
+                sawWall = true;
+                lastError = 'Instagram showed a login/challenge wall instead of the profile';
+            } else {
+                lastError = 'Profile data was not present on the page (Instagram may be limiting this IP)';
+            }
         } catch (err) {
             lastError = `${err.name}: ${err.message}`;
-            log.warning(`[${username}] Attempt ${attempt} threw: ${lastError}`);
+            log.warning(`[${username}] attempt ${attempt} threw: ${lastError}`);
+        } finally {
+            await page.close().catch(() => {});
         }
-        await sleep(requestDelayMs);
+        if (attempt < maxRetries) await sleep(requestDelayMs);
     }
-    return { ok: false, status: 'error', error: lastError || 'unknown', gated: gatedHits > 0 };
+    return { ok: false, status: sawWall ? 'blocked' : 'error', error: lastError || 'unknown', gated: sawWall };
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -948,6 +975,7 @@ async function fetchProfile(username, { proxyConfig, requestDelayMs, maxRetries,
 // ────────────────────────────────────────────────────────────────────
 await Actor.init();
 
+let browser = null;
 try {
     const input = (await Actor.getInput()) || {};
     const {
@@ -984,7 +1012,7 @@ try {
     }
 
     // authMode is a boolean only — the session cookie itself is never logged.
-    log.info(`Starting Instagram Profile Intel v1.5`, {
+    log.info(`Starting Instagram Profile Intel v1.6`, {
         usernameCount: cleanedUsernames.length,
         enrichLevel,
         useResidentialProxy,
@@ -1013,9 +1041,15 @@ try {
     }
 
     const startedAt = Date.now();
-    // One sticky proxy session id for the whole run — authenticated runs reuse it so the
-    // logged-in account stays on a single IP (see fetchProfile). Unique per run start.
+    // One sticky proxy session id for the whole run so the browser stays on a single IP.
     const runProxySession = safeSessionId('run', `${startedAt}`);
+
+    // Launch the fingerprinted browser used to read every profile page.
+    const bundle = await launchProfileBrowser({ proxyConfig, runProxySession, sessionCookie });
+    browser = bundle.browser;
+    const igContext = bundle.context;
+    log.info(`Browser ready (${bundle.authenticated ? 'logged in with your session' : 'anonymous'}).`);
+
     const summary = {
         usernamesRequested: cleanedUsernames.length,
         profilesScraped: 0,
@@ -1047,7 +1081,7 @@ try {
         const username = cleanedUsernames[i];
         log.info(`[${i + 1}/${cleanedUsernames.length}] @${username}`);
 
-        const result = await fetchProfile(username, { proxyConfig, requestDelayMs, maxRetries, sessionCookie, runProxySession });
+        const result = await fetchProfileBrowser(igContext, username, { maxRetries, requestDelayMs });
         if (!result.ok) {
             // Failures are recorded in the summary but NOT pushed as dataset items, so the
             // user is never charged (this actor bills per profile row) for a profile we could
@@ -1196,15 +1230,11 @@ try {
 
     // Delivered nothing AND at least one lookup failed for a reason other than "does not
     // exist" → a real failure, not a green SUCCEEDED. Pick the message that fits the cause.
-    const hadAuth = !!parseSessionCookie(sessionCookie);
     if (delivered === 0 && (summary.profilesBlocked + summary.profilesError) > 0) {
-        const authFailed = summary.errors.some((e) => e.status === 'auth_failed');
-        const rateLimited = summary.errors.some((e) => /429/.test(e.error || ''));
-        let msg;
-        if (authFailed) msg = 'Your Instagram session cookie was rejected (expired or invalid). Get a fresh sessionid and re-run. No profiles were charged.';
-        else if (rateLimited && hadAuth) msg = 'Instagram rate-limited this run (429). The session works, but the request pace was too high. Re-run with fewer usernames and a higher "Delay between profiles", ideally on the same run so the IP stays stable. No profiles were charged.';
-        else if (hadAuth) msg = 'No profiles returned despite a session cookie. Instagram may be temporarily limiting this account. No profiles were charged.';
-        else msg = 'Instagram blocked every anonymous lookup in this run. Paste your own sessionid in "sessionCookie" for reliable results. No profiles were charged.';
+        const blocked = summary.errors.some((e) => e.status === 'blocked');
+        const msg = blocked
+            ? 'Instagram showed a login/challenge wall for every profile this run — this IP is likely flagged. Retry, set a "Residential proxy country", or supply a mobile proxy in "customProxyUrl". No profiles were charged.'
+            : 'No profiles could be read this run. Instagram may be temporarily limiting this IP — retry or use a custom proxy. No profiles were charged.';
         await Actor.fail(msg);
     } else {
         await Actor.exit();
@@ -1214,4 +1244,7 @@ try {
     // forced exit code 0, so invalid input and crashes both showed a false SUCCEEDED.
     log.exception(err, 'Run failed');
     await Actor.fail(err?.message || 'Run failed');
+} finally {
+    // Always free the browser; closing it does not change the run's exit code.
+    if (browser) await browser.close().catch(() => {});
 }
