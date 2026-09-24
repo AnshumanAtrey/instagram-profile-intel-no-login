@@ -825,6 +825,9 @@ function compactPosts(user) {
 // ────────────────────────────────────────────────────────────────────
 const IG_APP_ID = '936619743392459';
 const DESKTOP_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+// Origin is overridable only for local end-to-end tests (a mock server); defaults to the
+// real site in every real run. Nothing but a test harness ever sets IG_BASE_URL.
+const IG_ORIGIN = process.env.IG_BASE_URL || 'https://www.instagram.com';
 
 // A logged-out browser hits the homepage first — Instagram sets csrftoken / mid / ig_did
 // there — and then calls the profile API carrying those cookies from the same IP. Skipping
@@ -832,7 +835,7 @@ const DESKTOP_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/
 async function guestSession(proxyUrl) {
     try {
         const res = await withTimeout(gotScraping({
-            url: 'https://www.instagram.com/',
+            url: `${IG_ORIGIN}/`,
             proxyUrl,
             headers: { 'User-Agent': DESKTOP_UA, Accept: 'text/html', 'Accept-Language': 'en-US,en;q=0.9' },
             timeout: { request: 12000 },
@@ -860,7 +863,7 @@ function isGate(response) {
 }
 
 async function fetchProfile(username, { proxyConfig, requestDelayMs, maxRetries }) {
-    const url = `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`;
+    const url = `${IG_ORIGIN}/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`;
     let lastError = null;
     let gatedHits = 0;
     for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
@@ -1124,11 +1127,11 @@ try {
     const summaryRecord = { recordType: 'summary', ...summary, durationSeconds: durationSec, completedAt: new Date().toISOString() };
     const delivered = summary.profilesScraped + summary.profilesPrivate;
 
-    // The summary is run metadata, not a result. It always goes to the free OUTPUT record
-    // (run's Output tab / getKeyValueStore). It is only ALSO pushed to the billed dataset when
-    // at least one profile was delivered — so a run that returns nothing costs the user $0.
+    // The summary is run metadata, not a result, so it lives ONLY in the free OUTPUT record
+    // (the run's Output tab). It is never pushed to the billed dataset — that way the dataset
+    // holds exactly one row per delivered profile and the charge equals the profile count,
+    // which is what the listing promises ("charged per Instagram profile scraped").
     await Actor.setValue('OUTPUT', summaryRecord);
-    if (delivered > 0) await Actor.pushData(summaryRecord);
     log.info('Run complete', { ...summary, durationSec });
 
     // Nothing delivered and Instagram gated everything → real failure, not a green SUCCEEDED.

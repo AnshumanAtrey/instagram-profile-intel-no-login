@@ -99,7 +99,7 @@ Each dataset record:
 }
 ```
 
-The final record of every run is a `summary` (also written to the run's `OUTPUT`): counts of scraped / private / not-found / blocked profiles, `invalidInputsSkipped`, totals, and duration. Blocked, not-found, and invalid entries appear only in that summary - never as charged rows.
+The dataset holds exactly one row per profile actually delivered - nothing else - so your charge equals the profile count. The run `summary` (counts of scraped / private / not-found / blocked profiles, `invalidInputsSkipped`, totals, duration) is written to the run's `OUTPUT` record, not the billed dataset. Blocked, not-found, and invalid entries appear only in that summary, never as charged rows.
 
 ## Common questions
 
