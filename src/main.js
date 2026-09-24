@@ -954,6 +954,8 @@ try {
         usernames = [],
         enrichLevel = 'full',
         useResidentialProxy = true,
+        proxyCountry = '',
+        customProxyUrl = '',
         requestDelayMs = 1500,
         maxRetries = 3,
         sessionCookie = '',
@@ -982,7 +984,7 @@ try {
     }
 
     // authMode is a boolean only — the session cookie itself is never logged.
-    log.info(`Starting Instagram Profile Intel v1.4`, {
+    log.info(`Starting Instagram Profile Intel v1.5`, {
         usernameCount: cleanedUsernames.length,
         enrichLevel,
         useResidentialProxy,
@@ -993,7 +995,22 @@ try {
         log.info('No session cookie provided — running anonymous (best-effort). Instagram blocks most anonymous lookups from cloud IPs; paste a sessionid in the "sessionCookie" input for reliable results. See the README for how to get it.');
     }
 
-    const proxyConfig = useResidentialProxy ? await Actor.createProxyConfiguration({ groups: ['RESIDENTIAL'] }) : null;
+    // Proxy selection, most specific first:
+    //  1. customProxyUrl  — the user's own proxy (a mobile / carrier IP is what actually
+    //     beats Instagram; Apify's shared residential pool is itself throttled by IG).
+    //  2. residential + optional country — match the session's home country to avoid the
+    //     "session created in X, used from Y" red flag.
+    //  3. no proxy.
+    let proxyConfig = null;
+    if (customProxyUrl && customProxyUrl.trim()) {
+        proxyConfig = await Actor.createProxyConfiguration({ proxyUrls: [customProxyUrl.trim()] });
+        log.info('Using your custom proxy URL.');
+    } else if (useResidentialProxy) {
+        const cfg = { groups: ['RESIDENTIAL'] };
+        if (proxyCountry && proxyCountry.trim()) cfg.countryCode = proxyCountry.trim().toUpperCase();
+        proxyConfig = await Actor.createProxyConfiguration(cfg);
+        if (cfg.countryCode) log.info(`Using Apify residential proxy in ${cfg.countryCode}.`);
+    }
 
     const startedAt = Date.now();
     // One sticky proxy session id for the whole run — authenticated runs reuse it so the

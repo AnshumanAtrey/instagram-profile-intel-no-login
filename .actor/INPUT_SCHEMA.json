@@ -1,15 +1,19 @@
 {
     "title": "Instagram Profile Intel",
-    "description": "Enter Instagram usernames. Get 25+ layers of intel per profile — bio emails (MX-verified), phones, multi-link bios, engagement quality, account age, posting patterns, hashtag campaigns, top/worst posts, cross-platform presence (8 platforms), tech stack of their website, pincode, country code, bio link health, profile pic metadata, and more. No Instagram login required.",
+    "description": "Enter Instagram usernames. Get 25+ layers of intel per profile \u2014 bio emails (MX-verified), phones, multi-link bios, engagement quality, account age, posting patterns, hashtag campaigns, top/worst posts, cross-platform presence (8 platforms), tech stack of their website, pincode, country code, bio link health, profile pic metadata, and more. No Instagram login required.",
     "type": "object",
     "schemaVersion": 1,
     "properties": {
         "usernames": {
             "title": "Instagram usernames",
             "type": "array",
-            "description": "List of Instagram usernames to analyze (without the @ symbol). Examples: 'zomato', 'biryanibykilo', 'plumgoodness'. Or paste full Instagram URLs — we auto-extract the username.",
+            "description": "List of Instagram usernames to analyze (without the @ symbol). Examples: 'zomato', 'biryanibykilo', 'plumgoodness'. Or paste full Instagram URLs \u2014 we auto-extract the username.",
             "editor": "stringList",
-            "prefill": ["biryanibykilo", "plumgoodness", "shaadiwish"],
+            "prefill": [
+                "biryanibykilo",
+                "plumgoodness",
+                "shaadiwish"
+            ],
             "uniqueItems": true,
             "minItems": 1,
             "maxItems": 1000
@@ -20,10 +24,13 @@
             "description": "Basic = profile + bio contacts + account age + IG capabilities. Full = adds engagement scoring, posting pattern, communication style, hashtag campaigns, top/worst posts, collabs, niche detection.",
             "editor": "select",
             "default": "full",
-            "enum": ["basic", "full"],
+            "enum": [
+                "basic",
+                "full"
+            ],
             "enumTitles": [
-                "Basic — identity + counts + bio contacts + account age + IG capabilities",
-                "Full — adds engagement + posting + style + hashtag campaigns + top posts + collabs (recommended)"
+                "Basic \u2014 identity + counts + bio contacts + account age + IG capabilities",
+                "Full \u2014 adds engagement + posting + style + hashtag campaigns + top posts + collabs (recommended)"
             ]
         },
         "checkCrossPlatform": {
@@ -52,7 +59,7 @@
         "validateEmailsViaMx": {
             "title": "MX-validate extracted emails (DNS check)",
             "type": "boolean",
-            "description": "For each email extracted from the bio, run a DNS MX lookup to verify the domain accepts email. Free, fast, no extra HTTP — uses DNS. Catches typos and fake domains.",
+            "description": "For each email extracted from the bio, run a DNS MX lookup to verify the domain accepts email. Free, fast, no extra HTTP \u2014 uses DNS. Catches typos and fake domains.",
             "editor": "checkbox",
             "default": true
         },
@@ -98,12 +105,27 @@
             "maximum": 10
         },
         "sessionCookie": {
-            "title": "Instagram session (sessionid) — optional, for reliable results",
+            "title": "Instagram session (sessionid) \u2014 optional, for reliable results",
             "type": "string",
-            "description": "Optional. Instagram blocks most anonymous lookups from cloud IPs, so without this you will often get empty results. Paste YOUR OWN Instagram sessionid to run authenticated and get reliable data. How to get it: open instagram.com logged in, DevTools (F12) > Application > Cookies > https://www.instagram.com > copy the value of the 'sessionid' cookie, and paste it here. You can paste just the sessionid value, or the whole cookie string. It is stored encrypted and never logged. WARNING: use a secondary/throwaway account — automated use can get an Instagram account rate-limited or banned. This does NOT unlock private accounts you do not already follow.",
+            "description": "Optional. Instagram blocks most anonymous lookups from cloud IPs, so without this you will often get empty results. Paste YOUR OWN Instagram sessionid to run authenticated and get reliable data. How to get it: open instagram.com logged in, DevTools (F12) > Application > Cookies > https://www.instagram.com > copy the value of the 'sessionid' cookie, and paste it here. You can paste just the sessionid value, or the whole cookie string. It is stored encrypted and never logged. WARNING: use a secondary/throwaway account \u2014 automated use can get an Instagram account rate-limited or banned. This does NOT unlock private accounts you do not already follow.",
+            "editor": "textfield",
+            "isSecret": true
+        },
+        "proxyCountry": {
+            "title": "Residential proxy country (optional)",
+            "type": "string",
+            "description": "Two-letter country code (e.g. IN, US, GB) for the Apify residential proxy. Match the country where your Instagram account normally logs in \u2014 using a session from a very different country makes Instagram suspicious. Leave blank for any country.",
+            "editor": "textfield"
+        },
+        "customProxyUrl": {
+            "title": "Custom proxy URL (optional) \u2014 for a mobile proxy",
+            "type": "string",
+            "description": "Your own proxy URL (http://user:pass@host:port). A MOBILE (4G/5G) proxy is the most reliable way to scrape Instagram \u2014 carrier IPs are shared by real users and hard for Instagram to block, unlike Apify's shared residential pool. If set, this overrides the Apify proxy. Stored encrypted.",
             "editor": "textfield",
             "isSecret": true
         }
     },
-    "required": ["usernames"]
+    "required": [
+        "usernames"
+    ]
 }
