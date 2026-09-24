@@ -45,7 +45,24 @@ Pay-per-event:
 - Bulk 100 profiles: **$5.01**
 - Bulk 1000 profiles: **$50.01**
 
-**You only pay for profiles actually delivered.** A username that does not exist, an invalid entry (an email or a link pasted by mistake), or a profile Instagram blocks behind its anonymous-access gate is recorded in the run summary but is **never charged** - no `Profile Record` event fires for it. If Instagram blocks every profile in a run, the run ends as failed and costs you nothing beyond the single `Actor Start`.
+**You only pay for profiles actually delivered.** A username that does not exist, an invalid entry (an email or a link pasted by mistake), or a profile Instagram blocks is recorded in the run summary but is **never charged** - no `Profile Record` event fires for it. If Instagram blocks every profile in a run, the run ends as failed and costs you nothing beyond the single `Actor Start`.
+
+## Getting reliable results: the `sessionCookie` input
+
+Instagram now blocks most **anonymous** profile lookups from cloud IP addresses (you get "please log in"). To get reliable results, run authenticated with **your own** Instagram session:
+
+1. Open [instagram.com](https://www.instagram.com) in your browser, logged in.
+2. Open DevTools (F12 or right-click > Inspect) > **Application** tab > **Cookies** > `https://www.instagram.com`.
+3. Copy the value of the **`sessionid`** cookie.
+4. Paste it into the `sessionCookie` input.
+
+The value is stored **encrypted** by Apify and is **never written to logs**. You can paste just the `sessionid` value or the whole cookie string.
+
+> **Use a secondary / throwaway account.** Automated use can get an Instagram account rate-limited or temporarily blocked. Do not use your main account.
+
+> This authenticates as you - it returns what **you** can already see when logged in. It does **not** unlock private accounts you do not follow.
+
+Without a `sessionCookie`, the actor still runs in anonymous best-effort mode (free, but Instagram will block most lookups). If your session is rejected, the run tells you the cookie is expired - grab a fresh `sessionid` and re-run.
 
 ## Which inputs does it take?
 
@@ -62,6 +79,7 @@ Pay-per-event:
 | `useResidentialProxy` | no | Route through Apify residential IPs. **Keep on** - Instagram blocks datacenter IPs. Default `true`. |
 | `requestDelayMs` | no | Delay between profiles (500-10000). Default `1500`. |
 | `maxRetries` | no | Attempts per username before it is recorded as failed (1-10). Default `3`. |
+| `sessionCookie` | no | Your own Instagram `sessionid` (secret, encrypted). Without it, anonymous mode is blocked by Instagram most of the time. See "Getting reliable results" above. |
 
 Every field except `usernames` has a working default, and `usernames` ships prefilled - so a run started with no changes succeeds.
 
@@ -107,7 +125,7 @@ The dataset holds exactly one row per profile actually delivered - nothing else 
 
 **Q: Does it scrape followers list?** No. Followers list requires login auth and is out of scope.
 
-**Q: Will my account be banned?** No. This actor uses zero login and no account credentials - there is no account of yours to ban.
+**Q: Will my account be banned?** In anonymous mode there is no account involved, so no. If you supply a `sessionCookie` for reliable results, that account carries the usual automation risk - use a secondary/throwaway account, not your main one. The cookie is stored encrypted and never logged.
 
 **Q: What about private accounts?** Private profiles still return - you get the public metadata Instagram exposes (username, full name, follower/following/post counts, bio, verified and business flags, external link) with `isPrivate: true` and `status: "private"`. Post-derived fields (engagement, posting pattern, top posts) come back empty because Instagram does not expose a private account's posts without a follow. Private profiles are charged as normal deliveries.
 

@@ -96,6 +96,13 @@
             "default": 3,
             "minimum": 1,
             "maximum": 10
+        },
+        "sessionCookie": {
+            "title": "Instagram session (sessionid) — optional, for reliable results",
+            "type": "string",
+            "description": "Optional. Instagram blocks most anonymous lookups from cloud IPs, so without this you will often get empty results. Paste YOUR OWN Instagram sessionid to run authenticated and get reliable data. How to get it: open instagram.com logged in, DevTools (F12) > Application > Cookies > https://www.instagram.com > copy the value of the 'sessionid' cookie, and paste it here. You can paste just the sessionid value, or the whole cookie string. It is stored encrypted and never logged. WARNING: use a secondary/throwaway account — automated use can get an Instagram account rate-limited or banned. This does NOT unlock private accounts you do not already follow.",
+            "editor": "textfield",
+            "isSecret": true
         }
     },
     "required": ["usernames"]

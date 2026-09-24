@@ -862,16 +862,34 @@ function isGate(response) {
         || (typeof response.body === 'object' && response.body?.require_login === true);
 }
 
-async function fetchProfile(username, { proxyConfig, requestDelayMs, maxRetries }) {
+// Turn a user-supplied session into a cookie map. Accepts either a bare `sessionid` value
+// or a full copied cookie string ("sessionid=...; csrftoken=...; ds_user_id=..."). The
+// sessionid is what authenticates the request AS THAT USER — it is never logged.
+function parseSessionCookie(raw) {
+    const s = (raw || '').toString().trim();
+    if (!s) return null;
+    if (!s.includes('=')) return { sessionid: s }; // bare sessionid value
+    const jar = {};
+    for (const part of s.split(';')) {
+        const eq = part.indexOf('=');
+        if (eq > 0) jar[part.slice(0, eq).trim()] = part.slice(eq + 1).trim();
+    }
+    return jar.sessionid ? jar : null;
+}
+
+async function fetchProfile(username, { proxyConfig, requestDelayMs, maxRetries, sessionCookie }) {
     const url = `${IG_ORIGIN}/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`;
+    const authCookies = parseSessionCookie(sessionCookie); // the user's own session, or null
     let lastError = null;
     let gatedHits = 0;
     for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
         try {
             // fresh proxy session each attempt: a gated IP stays gated, so a new one is the retry
-            const sessionId = safeSessionId(`ig${attempt}`, username);
-            const proxyUrl = proxyConfig ? await proxyConfig.newUrl(sessionId) : undefined;
-            const cookies = await guestSession(proxyUrl);
+            const proxySession = safeSessionId(`ig${attempt}`, username);
+            const proxyUrl = proxyConfig ? await proxyConfig.newUrl(proxySession) : undefined;
+            // guest cookies give a csrftoken/mid; the user's session (if any) authenticates.
+            const cookies = { ...(await guestSession(proxyUrl)), ...(authCookies || {}) };
+            const csrf = cookies.csrftoken;
             const headers = {
                 'User-Agent': DESKTOP_UA,
                 'x-ig-app-id': IG_APP_ID,
@@ -879,7 +897,7 @@ async function fetchProfile(username, { proxyConfig, requestDelayMs, maxRetries 
                 'Accept-Language': 'en-US,en;q=0.9',
                 Referer: `https://www.instagram.com/${username}/`,
                 'X-Requested-With': 'XMLHttpRequest',
-                ...(cookies.csrftoken ? { 'x-csrftoken': cookies.csrftoken } : {}),
+                ...(csrf ? { 'x-csrftoken': csrf } : {}),
                 ...(Object.keys(cookies).length
                     ? { Cookie: Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ') }
                     : {}),
@@ -893,8 +911,12 @@ async function fetchProfile(username, { proxyConfig, requestDelayMs, maxRetries 
             if (response.statusCode === 404) return { ok: false, status: 'not_found', error: 'Username does not exist on Instagram' };
             if (isGate(response)) {
                 gatedHits += 1;
-                lastError = `Instagram anonymous-access gate (HTTP ${response.statusCode})`;
-                return { ok: false, status: 'blocked', error: lastError, gated: true };
+                // With a session supplied, a gate means the cookie was rejected — expired or
+                // invalid — not the anonymous rate-limit. Say so, so the user knows to refresh it.
+                lastError = authCookies
+                    ? `Session cookie rejected by Instagram (HTTP ${response.statusCode}) — it is likely expired or invalid. Get a fresh sessionid and try again.`
+                    : `Instagram anonymous-access gate (HTTP ${response.statusCode}) — no session provided. Paste a sessionid for reliable results.`;
+                return { ok: false, status: authCookies ? 'auth_failed' : 'blocked', error: lastError, gated: true };
             }
             if (response.statusCode === 429) {
                 lastError = `Rate limited (429) on attempt ${attempt}`;
@@ -925,6 +947,7 @@ try {
         useResidentialProxy = true,
         requestDelayMs = 1500,
         maxRetries = 3,
+        sessionCookie = '',
         checkCrossPlatform: doCrossPlatform = true,
         enrichExternalUrl: doExternalUrl = true,
         expandMultiLinkBio = true,
@@ -949,12 +972,17 @@ try {
             : 'No usernames provided. Add at least one Instagram username to the "usernames" field (e.g. "zomato").');
     }
 
-    log.info(`Starting Instagram Profile Intel v1.2`, {
+    // authMode is a boolean only — the session cookie itself is never logged.
+    log.info(`Starting Instagram Profile Intel v1.3`, {
         usernameCount: cleanedUsernames.length,
         enrichLevel,
         useResidentialProxy,
+        authMode: parseSessionCookie(sessionCookie) ? 'session' : 'anonymous',
         toggles: { doCrossPlatform, doExternalUrl, expandMultiLinkBio, validateEmailsViaMx, doBioLinkHealth, doProfilePicMeta },
     });
+    if (!parseSessionCookie(sessionCookie)) {
+        log.info('No session cookie provided — running anonymous (best-effort). Instagram blocks most anonymous lookups from cloud IPs; paste a sessionid in the "sessionCookie" input for reliable results. See the README for how to get it.');
+    }
 
     const proxyConfig = useResidentialProxy ? await Actor.createProxyConfiguration({ groups: ['RESIDENTIAL'] }) : null;
 
@@ -990,7 +1018,7 @@ try {
         const username = cleanedUsernames[i];
         log.info(`[${i + 1}/${cleanedUsernames.length}] @${username}`);
 
-        const result = await fetchProfile(username, { proxyConfig, requestDelayMs, maxRetries });
+        const result = await fetchProfile(username, { proxyConfig, requestDelayMs, maxRetries, sessionCookie });
         if (!result.ok) {
             // Failures are recorded in the summary but NOT pushed as dataset items, so the
             // user is never charged (this actor bills per profile row) for a profile we could
@@ -1003,7 +1031,10 @@ try {
             consecutiveGated = result.gated ? consecutiveGated + 1 : 0;
             if (consecutiveGated >= GATE_ABORT_AFTER) {
                 summary.abortedOnGate = true;
-                log.warning(`Instagram gated ${consecutiveGated} usernames in a row — stopping to avoid wasting your run. ${cleanedUsernames.length - i - 1} username(s) not attempted.`);
+                const why = result.status === 'auth_failed'
+                    ? `Instagram rejected the session cookie ${consecutiveGated} times in a row — it is expired or invalid. Get a fresh sessionid and re-run.`
+                    : `Instagram gated ${consecutiveGated} usernames in a row with no session — stopping to avoid wasting your run. Paste a sessionid for reliable results.`;
+                log.warning(`${why} ${cleanedUsernames.length - i - 1} username(s) not attempted.`);
                 break;
             }
             if (i < cleanedUsernames.length - 1) await sleep(requestDelayMs);
