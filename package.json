@@ -2,18 +2,20 @@
     "name": "instagram-profile-intel-no-login",
     "version": "1.0.0",
     "type": "module",
-    "description": "Instagram Profile Intel — no login, no cookies — bio emails, multi-link expansion, engagement scoring, 25+ fields",
+    "description": "Instagram Profile Intel \u2014 no login, no cookies \u2014 bio emails, multi-link expansion, engagement scoring, 25+ fields",
     "scripts": {
         "start": "node src/main.js"
     },
     "dependencies": {
         "apify": "^3.4.0",
-        "got-scraping": "^4.1.0",
-        "playwright": "^1.63.0"
+        "got-scraping": "^4.1.0"
     },
     "engines": {
         "node": ">=20"
     },
     "author": "Anshuman Atrey",
-    "license": "ISC"
+    "license": "ISC",
+    "devDependencies": {
+        "playwright": "^1.63.0"
+    }
 }
