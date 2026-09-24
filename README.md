@@ -47,22 +47,18 @@ Pay-per-event:
 
 **You only pay for profiles actually delivered.** A username that does not exist, an invalid entry (an email or a link pasted by mistake), or a profile Instagram blocks is recorded in the run summary but is **never charged** - no `Profile Record` event fires for it. If Instagram blocks every profile in a run, the run ends as failed and costs you nothing beyond the single `Actor Start`.
 
-## Getting reliable results: the `sessionCookie` input
+## No login needed - and how to get even more (optional)
 
-Instagram now blocks most **anonymous** profile lookups from cloud IP addresses (you get "please log in"). To get reliable results, run authenticated with **your own** Instagram session:
+This actor works **without any login**. It loads each public profile in a real browser and reads the profile data Instagram embeds in the page - name, follower / following / post counts, bio, bio links, verified and business flags, external URL, profile picture. That is the default, and it needs nothing from you but usernames.
 
-1. Open [instagram.com](https://www.instagram.com) in your browser, logged in.
-2. Open DevTools (F12 or right-click > Inspect) > **Application** tab > **Cookies** > `https://www.instagram.com`.
-3. Copy the value of the **`sessionid`** cookie.
-4. Paste it into the `sessionCookie` input.
+**Recent posts** (engagement rate, top posts, posting pattern) are **not** exposed to a logged-out browser. If you want those too, you can optionally supply your own Instagram session:
 
-The value is stored **encrypted** by Apify and is **never written to logs**. You can paste just the `sessionid` value or the whole cookie string.
+1. Open [instagram.com](https://www.instagram.com) logged in, DevTools (F12) > **Application** > **Cookies** > `https://www.instagram.com`.
+2. Copy the **`sessionid`** value into the `sessionCookie` input (stored encrypted, never logged).
 
-> **Use a secondary / throwaway account.** Automated use can get an Instagram account rate-limited or temporarily blocked. Do not use your main account.
+> **Use a secondary / throwaway account** for `sessionCookie`. Automated use can get an Instagram account rate-limited. It returns only what **you** can already see logged in - it does **not** unlock private accounts you do not follow.
 
-> This authenticates as you - it returns what **you** can already see when logged in. It does **not** unlock private accounts you do not follow.
-
-Without a `sessionCookie`, the actor still runs in anonymous best-effort mode (free, but Instagram will block most lookups). If your session is rejected, the run tells you the cookie is expired - grab a fresh `sessionid` and re-run.
+If a run comes back empty, the IP may be flagged - retry, set a **`proxyCountry`**, or plug a mobile proxy into **`customProxyUrl`**. Either way you are never charged for a profile that did not come back.
 
 ## Which inputs does it take?
 
