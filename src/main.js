@@ -877,18 +877,24 @@ function parseSessionCookie(raw) {
     return jar.sessionid ? jar : null;
 }
 
-async function fetchProfile(username, { proxyConfig, requestDelayMs, maxRetries, sessionCookie }) {
+async function fetchProfile(username, { proxyConfig, requestDelayMs, maxRetries, sessionCookie, runProxySession }) {
     const url = `${IG_ORIGIN}/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`;
     const authCookies = parseSessionCookie(sessionCookie); // the user's own session, or null
+    const authenticated = !!authCookies;
     let lastError = null;
     let gatedHits = 0;
     for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
         try {
-            // fresh proxy session each attempt: a gated IP stays gated, so a new one is the retry
-            const proxySession = safeSessionId(`ig${attempt}`, username);
+            // Authenticated: ONE sticky IP for the whole run. A logged-in account that hops
+            // residential IPs every request looks hijacked and gets throttled (429) — the exact
+            // failure a first test showed. Anonymous: rotate the IP each attempt to dodge the
+            // per-IP anonymous gate.
+            const proxySession = authenticated ? runProxySession : safeSessionId(`ig${attempt}`, username);
             const proxyUrl = proxyConfig ? await proxyConfig.newUrl(proxySession) : undefined;
-            // guest cookies give a csrftoken/mid; the user's session (if any) authenticates.
-            const cookies = { ...(await guestSession(proxyUrl)), ...(authCookies || {}) };
+            // Authenticated GET carries only the session cookie — no homepage bootstrap, which
+            // just doubles the request rate and worsens throttling. Anonymous needs a guest
+            // csrftoken/mid from the homepage.
+            const cookies = authenticated ? authCookies : await guestSession(proxyUrl);
             const csrf = cookies.csrftoken;
             const headers = {
                 'User-Agent': DESKTOP_UA,
@@ -919,9 +925,12 @@ async function fetchProfile(username, { proxyConfig, requestDelayMs, maxRetries,
                 return { ok: false, status: authCookies ? 'auth_failed' : 'blocked', error: lastError, gated: true };
             }
             if (response.statusCode === 429) {
-                lastError = `Rate limited (429) on attempt ${attempt}`;
-                log.warning(`[${username}] ${lastError} — retrying in ${requestDelayMs * attempt}ms`);
-                await sleep(requestDelayMs * attempt);
+                // Exponential backoff, capped. On an authenticated run 429 means "slow down",
+                // not "blocked" — the session is valid, the pace is too high.
+                const backoff = Math.min(20000, requestDelayMs * 2 ** attempt);
+                lastError = `Rate limited (429)${authenticated ? ' — session valid, Instagram is throttling the request pace' : ''} on attempt ${attempt}`;
+                log.warning(`[${username}] ${lastError} — backing off ${backoff}ms`);
+                await sleep(backoff);
                 continue;
             }
             lastError = `HTTP ${response.statusCode}`;
@@ -973,7 +982,7 @@ try {
     }
 
     // authMode is a boolean only — the session cookie itself is never logged.
-    log.info(`Starting Instagram Profile Intel v1.3`, {
+    log.info(`Starting Instagram Profile Intel v1.4`, {
         usernameCount: cleanedUsernames.length,
         enrichLevel,
         useResidentialProxy,
@@ -987,6 +996,9 @@ try {
     const proxyConfig = useResidentialProxy ? await Actor.createProxyConfiguration({ groups: ['RESIDENTIAL'] }) : null;
 
     const startedAt = Date.now();
+    // One sticky proxy session id for the whole run — authenticated runs reuse it so the
+    // logged-in account stays on a single IP (see fetchProfile). Unique per run start.
+    const runProxySession = safeSessionId('run', `${startedAt}`);
     const summary = {
         usernamesRequested: cleanedUsernames.length,
         profilesScraped: 0,
@@ -1018,7 +1030,7 @@ try {
         const username = cleanedUsernames[i];
         log.info(`[${i + 1}/${cleanedUsernames.length}] @${username}`);
 
-        const result = await fetchProfile(username, { proxyConfig, requestDelayMs, maxRetries, sessionCookie });
+        const result = await fetchProfile(username, { proxyConfig, requestDelayMs, maxRetries, sessionCookie, runProxySession });
         if (!result.ok) {
             // Failures are recorded in the summary but NOT pushed as dataset items, so the
             // user is never charged (this actor bills per profile row) for a profile we could
@@ -1165,9 +1177,18 @@ try {
     await Actor.setValue('OUTPUT', summaryRecord);
     log.info('Run complete', { ...summary, durationSec });
 
-    // Nothing delivered and Instagram gated everything → real failure, not a green SUCCEEDED.
-    if (delivered === 0 && summary.profilesBlocked > 0 && summary.profilesNotFound === 0) {
-        await Actor.fail('Instagram blocked every profile in this run (anonymous-access gate). No profiles were charged. Retry with residential proxy on, or fewer usernames.');
+    // Delivered nothing AND at least one lookup failed for a reason other than "does not
+    // exist" → a real failure, not a green SUCCEEDED. Pick the message that fits the cause.
+    const hadAuth = !!parseSessionCookie(sessionCookie);
+    if (delivered === 0 && (summary.profilesBlocked + summary.profilesError) > 0) {
+        const authFailed = summary.errors.some((e) => e.status === 'auth_failed');
+        const rateLimited = summary.errors.some((e) => /429/.test(e.error || ''));
+        let msg;
+        if (authFailed) msg = 'Your Instagram session cookie was rejected (expired or invalid). Get a fresh sessionid and re-run. No profiles were charged.';
+        else if (rateLimited && hadAuth) msg = 'Instagram rate-limited this run (429). The session works, but the request pace was too high. Re-run with fewer usernames and a higher "Delay between profiles", ideally on the same run so the IP stays stable. No profiles were charged.';
+        else if (hadAuth) msg = 'No profiles returned despite a session cookie. Instagram may be temporarily limiting this account. No profiles were charged.';
+        else msg = 'Instagram blocked every anonymous lookup in this run. Paste your own sessionid in "sessionCookie" for reliable results. No profiles were charged.';
+        await Actor.fail(msg);
     } else {
         await Actor.exit();
     }
