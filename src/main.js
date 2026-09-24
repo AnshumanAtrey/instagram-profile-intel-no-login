@@ -151,12 +151,16 @@ function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
 }
 
+// Instagram handles: 1-30 chars, letters / digits / period / underscore only. Returns the
+// normalized handle, or null for anything that can't be one (emails, URLs to other sites,
+// blanks, over-length) so bad input is reported and skipped instead of wasting a request.
+const IG_HANDLE = /^[a-z0-9._]{1,30}$/;
 function parseUsername(input) {
     const s = (input || '').toString().trim();
     if (!s) return null;
-    const urlMatch = s.match(/instagram\.com\/([a-zA-Z0-9._]+)\/?/);
-    if (urlMatch) return urlMatch[1].toLowerCase();
-    return s.replace(/^@/, '').toLowerCase();
+    const urlMatch = s.match(/instagram\.com\/([a-zA-Z0-9._]+)\/?/i);
+    const handle = (urlMatch ? urlMatch[1] : s.replace(/^@/, '')).toLowerCase();
+    return IG_HANDLE.test(handle) ? handle : null;
 }
 
 function uniqueClean(arr) {
@@ -819,18 +823,64 @@ function compactPosts(user) {
 // ────────────────────────────────────────────────────────────────────
 // Instagram fetch + retry
 // ────────────────────────────────────────────────────────────────────
+const IG_APP_ID = '936619743392459';
+const DESKTOP_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+
+// A logged-out browser hits the homepage first — Instagram sets csrftoken / mid / ig_did
+// there — and then calls the profile API carrying those cookies from the same IP. Skipping
+// this is why bare API calls now get the anonymous-access gate. Cached per proxy session.
+async function guestSession(proxyUrl) {
+    try {
+        const res = await withTimeout(gotScraping({
+            url: 'https://www.instagram.com/',
+            proxyUrl,
+            headers: { 'User-Agent': DESKTOP_UA, Accept: 'text/html', 'Accept-Language': 'en-US,en;q=0.9' },
+            timeout: { request: 12000 },
+            throwHttpErrors: false,
+            retry: { limit: 0 },
+        }), 15000, 'guestSession');
+        const jar = {};
+        for (const c of [].concat(res.headers['set-cookie'] || [])) {
+            const kv = c.split(';')[0];
+            const eq = kv.indexOf('=');
+            if (eq > 0) jar[kv.slice(0, eq).trim()] = kv.slice(eq + 1).trim();
+        }
+        return jar;
+    } catch {
+        return {};
+    }
+}
+
+// Instagram's anonymous-access gate: 401 {"require_login":true,...}. Not a missing profile,
+// not our bug — the request was refused before any data. Charging for these is the defect.
+function isGate(response) {
+    return response.statusCode === 401
+        || response.statusCode === 403
+        || (typeof response.body === 'object' && response.body?.require_login === true);
+}
+
 async function fetchProfile(username, { proxyConfig, requestDelayMs, maxRetries }) {
-    const url = `https://i.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`;
-    const headers = {
-        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-        'x-ig-app-id': '936619743392459',
-        'Accept': '*/*',
-        'Accept-Language': 'en-US,en;q=0.9',
-    };
+    const url = `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`;
     let lastError = null;
+    let gatedHits = 0;
     for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
         try {
-            const proxyUrl = proxyConfig ? await proxyConfig.newUrl(safeSessionId(`ig${attempt}`, username)) : undefined;
+            // fresh proxy session each attempt: a gated IP stays gated, so a new one is the retry
+            const sessionId = safeSessionId(`ig${attempt}`, username);
+            const proxyUrl = proxyConfig ? await proxyConfig.newUrl(sessionId) : undefined;
+            const cookies = await guestSession(proxyUrl);
+            const headers = {
+                'User-Agent': DESKTOP_UA,
+                'x-ig-app-id': IG_APP_ID,
+                Accept: '*/*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                Referer: `https://www.instagram.com/${username}/`,
+                'X-Requested-With': 'XMLHttpRequest',
+                ...(cookies.csrftoken ? { 'x-csrftoken': cookies.csrftoken } : {}),
+                ...(Object.keys(cookies).length
+                    ? { Cookie: Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ') }
+                    : {}),
+            };
             const response = await withTimeout(
                 gotScraping({ url, headers, proxyUrl, responseType: 'json', timeout: { request: 12000, connect: 5000, response: 8000 }, throwHttpErrors: false, retry: { limit: 0 } }),
                 15000,
@@ -838,6 +888,11 @@ async function fetchProfile(username, { proxyConfig, requestDelayMs, maxRetries 
             );
             if (response.statusCode === 200 && response.body?.data?.user) return { ok: true, user: response.body.data.user };
             if (response.statusCode === 404) return { ok: false, status: 'not_found', error: 'Username does not exist on Instagram' };
+            if (isGate(response)) {
+                gatedHits += 1;
+                lastError = `Instagram anonymous-access gate (HTTP ${response.statusCode})`;
+                return { ok: false, status: 'blocked', error: lastError, gated: true };
+            }
             if (response.statusCode === 429) {
                 lastError = `Rate limited (429) on attempt ${attempt}`;
                 log.warning(`[${username}] ${lastError} — retrying in ${requestDelayMs * attempt}ms`);
@@ -851,7 +906,7 @@ async function fetchProfile(username, { proxyConfig, requestDelayMs, maxRetries 
         }
         await sleep(requestDelayMs);
     }
-    return { ok: false, status: 'error', error: lastError || 'unknown' };
+    return { ok: false, status: 'error', error: lastError || 'unknown', gated: gatedHits > 0 };
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -875,12 +930,23 @@ try {
         fetchProfilePicMeta: doProfilePicMeta = true,
     } = input;
 
-    const cleanedUsernames = uniqueClean(usernames.map(parseUsername));
+    // Separate usable handles from unusable input, so the user learns exactly what was
+    // skipped rather than having bad entries silently vanish or waste a charged request.
+    const rawList = Array.isArray(usernames) ? usernames : [];
+    const invalidInputs = [...new Set(rawList
+        .map((r) => String(r ?? '').trim())
+        .filter((r) => r && !parseUsername(r)))];
+    const cleanedUsernames = [...new Set(rawList.map(parseUsername).filter(Boolean))];
+    if (invalidInputs.length) {
+        log.warning(`Skipped ${invalidInputs.length} entr${invalidInputs.length === 1 ? 'y' : 'ies'} that are not Instagram usernames: ${invalidInputs.slice(0, 10).join(', ')}`);
+    }
     if (cleanedUsernames.length === 0) {
-        throw new Error('No valid usernames provided. Pass at least one in the "usernames" array.');
+        throw new Error(invalidInputs.length
+            ? `No valid Instagram usernames. These are not usable handles: ${invalidInputs.slice(0, 5).join(', ')}${invalidInputs.length > 5 ? '…' : ''}. Pass handles like "zomato" or full profile URLs — not emails, links to other sites, or names over 30 characters.`
+            : 'No usernames provided. Add at least one Instagram username to the "usernames" field (e.g. "zomato").');
     }
 
-    log.info(`Starting Instagram Profile Intel v1.3`, {
+    log.info(`Starting Instagram Profile Intel v1.2`, {
         usernameCount: cleanedUsernames.length,
         enrichLevel,
         useResidentialProxy,
@@ -896,6 +962,9 @@ try {
         profilesNotFound: 0,
         profilesPrivate: 0,
         profilesError: 0,
+        profilesBlocked: 0,
+        abortedOnGate: false,
+        invalidInputsSkipped: invalidInputs,
         totalEmailsFound: 0,
         totalPhonesFound: 0,
         totalBioLinks: 0,
@@ -909,20 +978,35 @@ try {
         errors: [],
     };
 
+    // Consecutive gate refusals before we stop the run: at that point Instagram is gating
+    // this IP pool and every further username only burns the user's time and proxy traffic.
+    const GATE_ABORT_AFTER = 3;
+    let consecutiveGated = 0;
+
     for (let i = 0; i < cleanedUsernames.length; i += 1) {
         const username = cleanedUsernames[i];
         log.info(`[${i + 1}/${cleanedUsernames.length}] @${username}`);
 
         const result = await fetchProfile(username, { proxyConfig, requestDelayMs, maxRetries });
         if (!result.ok) {
-            const record = { recordType: 'profile', username, profileUrl: `https://www.instagram.com/${username}/`, scrapedAt: new Date().toISOString(), status: result.status, error: result.error };
-            await Actor.pushData(record);
+            // Failures are recorded in the summary but NOT pushed as dataset items, so the
+            // user is never charged (this actor bills per profile row) for a profile we could
+            // not deliver — not_found, private-gate, or Instagram's anonymous-access block.
             if (result.status === 'not_found') summary.profilesNotFound += 1;
+            else if (result.gated) summary.profilesBlocked += 1;
             else summary.profilesError += 1;
-            summary.errors.push({ username, error: result.error });
+            summary.errors.push({ username, status: result.status, error: result.error });
+
+            consecutiveGated = result.gated ? consecutiveGated + 1 : 0;
+            if (consecutiveGated >= GATE_ABORT_AFTER) {
+                summary.abortedOnGate = true;
+                log.warning(`Instagram gated ${consecutiveGated} usernames in a row — stopping to avoid wasting your run. ${cleanedUsernames.length - i - 1} username(s) not attempted.`);
+                break;
+            }
             if (i < cleanedUsernames.length - 1) await sleep(requestDelayMs);
             continue;
         }
+        consecutiveGated = 0;
 
         const u = result.user;
         const bioText = u.biography || '';
@@ -1037,11 +1121,25 @@ try {
     }
 
     const durationSec = Math.round((Date.now() - startedAt) / 1000);
-    await Actor.pushData({ recordType: 'summary', ...summary, durationSeconds: durationSec, completedAt: new Date().toISOString() });
+    const summaryRecord = { recordType: 'summary', ...summary, durationSeconds: durationSec, completedAt: new Date().toISOString() };
+    const delivered = summary.profilesScraped + summary.profilesPrivate;
+
+    // The summary is run metadata, not a result. It always goes to the free OUTPUT record
+    // (run's Output tab / getKeyValueStore). It is only ALSO pushed to the billed dataset when
+    // at least one profile was delivered — so a run that returns nothing costs the user $0.
+    await Actor.setValue('OUTPUT', summaryRecord);
+    if (delivered > 0) await Actor.pushData(summaryRecord);
     log.info('Run complete', { ...summary, durationSec });
+
+    // Nothing delivered and Instagram gated everything → real failure, not a green SUCCEEDED.
+    if (delivered === 0 && summary.profilesBlocked > 0 && summary.profilesNotFound === 0) {
+        await Actor.fail('Instagram blocked every profile in this run (anonymous-access gate). No profiles were charged. Retry with residential proxy on, or fewer usernames.');
+    } else {
+        await Actor.exit();
+    }
 } catch (err) {
+    // A thrown error (including empty input) must end FAILED — the old finally{ exit() }
+    // forced exit code 0, so invalid input and crashes both showed a false SUCCEEDED.
     log.exception(err, 'Run failed');
-    throw err;
-} finally {
-    await Actor.exit();
+    await Actor.fail(err?.message || 'Run failed');
 }

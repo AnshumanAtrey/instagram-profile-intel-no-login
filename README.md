@@ -45,13 +45,25 @@ Pay-per-event:
 - Bulk 100 profiles: **$5.01**
 - Bulk 1000 profiles: **$50.01**
 
+**You only pay for profiles actually delivered.** A username that does not exist, an invalid entry (an email or a link pasted by mistake), or a profile Instagram blocks behind its anonymous-access gate is recorded in the run summary but is **never charged** - no `Profile Record` event fires for it. If Instagram blocks every profile in a run, the run ends as failed and costs you nothing beyond the single `Actor Start`.
+
 ## Which inputs does it take?
 
 | Field | Required | What it does |
 |---|---|---|
-| `usernames` | yes | Array of Instagram usernames |
-| `expand_links` | no | Recursively expand multi-link bios (default: true) |
-| `validate_emails` | no | MX-validate extracted emails (default: true) |
+| `usernames` | yes | Array of Instagram handles or profile URLs. `@` is optional; URLs are auto-parsed. Prefilled so a default run works out of the box. |
+| `enrichLevel` | no | `basic` (identity + bio contacts + account age) or `full` (adds engagement, posting pattern, hashtag campaigns, top posts, niche). Default `full`. |
+| `checkCrossPlatform` | no | Check if the same handle exists on 8 other platforms. Default `true`. |
+| `enrichExternalUrl` | no | Fetch the bio website's og-metadata, extra emails/phones, and tech stack. Default `true`. |
+| `expandMultiLinkBio` | no | Expand linktr.ee / beacons.ai / bio.link into child links. Default `true`. |
+| `validateEmailsViaMx` | no | DNS MX-check each bio email. Default `true`. |
+| `checkBioLinkHealth` | no | HEAD each bio link to flag dead ones. Default `true`. |
+| `fetchProfilePicMeta` | no | Profile-picture size and type. Default `true`. |
+| `useResidentialProxy` | no | Route through Apify residential IPs. **Keep on** - Instagram blocks datacenter IPs. Default `true`. |
+| `requestDelayMs` | no | Delay between profiles (500-10000). Default `1500`. |
+| `maxRetries` | no | Attempts per username before it is recorded as failed (1-10). Default `3`. |
+
+Every field except `usernames` has a working default, and `usernames` ships prefilled - so a run started with no changes succeeds.
 
 ## What does the output look like?
 
@@ -59,32 +71,35 @@ Each dataset record:
 
 ```json
 {
+  "recordType": "profile",
   "username": "exampleuser",
-  "full_name": "Example User",
-  "bio": "DM for collabs hello@example.com +91 9876543210 linktr.ee/exampleuser",
-  "bio_emails": [
-    {
-      "email": "hello@example.com",
-      "mx_valid": true
-    }
-  ],
-  "bio_phones": [
-    "+919876543210"
-  ],
-  "followers": 12500,
-  "following": 350,
-  "posts": 184,
-  "engagement_quality_score": 0.82,
-  "account_age_days": 980,
-  "linktree_expansion": [
-    "https://example.com",
-    "https://twitter.com/exampleuser"
-  ],
-  "external_link": "https://linktr.ee/exampleuser",
-  "is_business": true,
-  "category": "Creator"
+  "fullName": "Example User",
+  "status": "public",
+  "isPrivate": false,
+  "isVerified": false,
+  "isBusinessAccount": true,
+  "category": "Creator",
+  "detectedNiche": "food",
+  "followerCount": 12500,
+  "followingCount": 350,
+  "postCount": 184,
+  "biography": "DM for collabs hello@example.com +91 98765 43210 linktr.ee/exampleuser",
+  "extractedFromBio": {
+    "emails": ["hello@example.com"],
+    "phones": ["+919876543210"],
+    "whatsappLinks": []
+  },
+  "mxValidatedEmails": [{ "email": "hello@example.com", "hasValidMx": true }],
+  "externalUrl": "https://linktr.ee/exampleuser",
+  "multiLinkExpanded": { "childLinkCount": 2, "childLinks": ["https://example.com", "https://x.com/exampleuser"] },
+  "accountAge": { "estimatedJoinDate": "2023-05-01", "ageBucket": "2-3 years" },
+  "engagement": { "engagementRate": 0.031, "engagementQuality": "high" },
+  "crossPlatform": { "twitter": { "exists": true, "url": "https://x.com/exampleuser" } },
+  "profileUrl": "https://www.instagram.com/exampleuser/"
 }
 ```
+
+The final record of every run is a `summary` (also written to the run's `OUTPUT`): counts of scraped / private / not-found / blocked profiles, `invalidInputsSkipped`, totals, and duration. Blocked, not-found, and invalid entries appear only in that summary - never as charged rows.
 
 ## Common questions
 
@@ -92,7 +107,13 @@ Each dataset record:
 
 **Q: Does it scrape followers list?** No. Followers list requires login auth and is out of scope.
 
-**Q: Will my account be banned?** No. This actor uses zero auth - no account is at risk.
+**Q: Will my account be banned?** No. This actor uses zero login and no account credentials - there is no account of yours to ban.
+
+**Q: What about private accounts?** Private profiles still return - you get the public metadata Instagram exposes (username, full name, follower/following/post counts, bio, verified and business flags, external link) with `isPrivate: true` and `status: "private"`. Post-derived fields (engagement, posting pattern, top posts) come back empty because Instagram does not expose a private account's posts without a follow. Private profiles are charged as normal deliveries.
+
+**Q: I passed 10 usernames but got fewer rows. Why?** Rows are only produced for profiles actually retrieved. Check the run summary (the `OUTPUT` record, also shown on the run's Output tab): `profilesNotFound`, `profilesBlocked`, and `invalidInputsSkipped` list exactly what did not come through, and none of those were charged. If many are `blocked`, Instagram is rate-limiting the IP pool - re-run with residential proxy on (the default) or fewer usernames per run.
+
+**Q: What counts as an invalid username?** Anything that is not an Instagram handle: an email address, a link to another site, a blank entry, or a name over 30 characters. These are skipped, listed in `invalidInputsSkipped`, and never charged. You can pass either bare handles (`zomato`) or full profile URLs (`https://www.instagram.com/zomato/`) - both work.
 
 ---
 
