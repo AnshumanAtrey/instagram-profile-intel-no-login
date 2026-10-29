@@ -1,0 +1,26 @@
+{
+    "actorOutputSchemaVersion": 1,
+    "title": "Instagram Profile Scraper output",
+    "description": "One row per Instagram profile that was read, with bio, contacts, links and engagement, plus a run summary that names every username not delivered and why.",
+    "type": "object",
+    "properties": {
+        "profiles": {
+            "type": "string",
+            "title": "Profiles (profiles)",
+            "description": "One row per delivered profile: username, name, bio, followers, following, posts, verified, business and category, bio emails (MX-checked) and phones, bio links and where they lead, cross-platform matches, account age, niche and, with a session cookie, engagement and posting patterns. Each row is one charged profile.",
+            "template": "{{links.apiDefaultDatasetUrl}}/items"
+        },
+        "summary": {
+            "type": "string",
+            "title": "Run summary (summary)",
+            "description": "The OUTPUT record: profiles scraped, private, not found, blocked and failed, each username that was not delivered with the reason, totals of emails, phones and links found, and how many fresh IPs a login wall needed.",
+            "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/OUTPUT"
+        },
+        "log": {
+            "type": "string",
+            "title": "Run log (log)",
+            "description": "Progress per username, retries, and why a profile was skipped.",
+            "template": "{{links.publicRunUrl}}/log"
+        }
+    }
+}

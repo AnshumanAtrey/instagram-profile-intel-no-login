@@ -911,6 +911,9 @@ function extractUserFromScripts(scriptTexts, uname) {
     return best;
 }
 
+// IG_TEST_WALLED_IPS=n (local tests only): the first n browsers act as if Instagram walled their IP.
+let browsersLaunched = 0;
+
 async function launchProfileBrowser({ proxyConfig, runProxySession, sessionCookie }) {
     const { chromium } = await import('playwright');
     const launchOptions = { headless: true, args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'] };
@@ -929,15 +932,29 @@ async function launchProfileBrowser({ proxyConfig, runProxySession, sessionCooki
     if (auth) {
         await context.addCookies(Object.entries(auth).map(([name, value]) => ({ name, value, domain: '.instagram.com', path: '/' })));
     }
+    browsersLaunched += 1;
+    context.testWalled = browsersLaunched <= Number(process.env.IG_TEST_WALLED_IPS || 0);
     return { browser, context, authenticated: !!auth };
 }
 
-async function fetchProfileBrowser(context, username, { maxRetries, requestDelayMs }) {
+// Instagram renders the profile JSON into the page's HTML, so the first try loads only the document:
+// no scripts, styles, images, video or fonts. Measured 2026-10-29 on three profiles: 140 KB instead of
+// 3.0-3.7 MB, the same 23 profile fields and og:description. Every byte goes through the residential
+// proxy at $8/GB, and the full loads were 94% of a run's cost (run OM1RoPveAIV2pG8DA: 9.4 MB, $0.075
+// for 3 profiles). A page that still lacks the data is tried again with scripts allowed.
+const LEAN_BLOCK = ['script', 'stylesheet', 'image', 'media', 'font'];
+const SCRIPTED_BLOCK = ['image', 'media', 'font'];
+
+async function fetchProfileBrowser(context, username, { maxRetries, requestDelayMs, stopOnWall = false }) {
     let lastError = null;
     let sawWall = false;
+    let block = LEAN_BLOCK;
     for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
         const page = await context.newPage();
         try {
+            if (context.testWalled) return { ok: false, status: 'blocked', error: 'Simulated wall (IG_TEST_WALLED_IPS)', gated: true };
+            const blocked = block;
+            await page.route('**/*', (route) => (blocked.includes(route.request().resourceType()) ? route.abort() : route.continue()));
             const resp = await page.goto(`${IG_ORIGIN}/${encodeURIComponent(username)}/`, { waitUntil: 'domcontentloaded', timeout: 30000 });
             const status = resp?.status();
             if (status === 404) return { ok: false, status: 'not_found', error: 'Username does not exist on Instagram' };
@@ -956,9 +973,12 @@ async function fetchProfileBrowser(context, username, { maxRetries, requestDelay
             if (/log in|sign up|challenge|checkpoint|confirm it'?s you/i.test(pageText)) {
                 sawWall = true;
                 lastError = 'Instagram showed a login/challenge wall instead of the profile';
+                // Retrying a flagged IP rarely helps; the caller moves to a fresh one instead.
+                if (stopOnWall) break;
             } else {
                 lastError = 'Profile data was not present on the page (Instagram may be limiting this IP)';
             }
+            block = SCRIPTED_BLOCK;
         } catch (err) {
             lastError = `${err.name}: ${err.message}`;
             log.warning(`[${username}] attempt ${attempt} threw: ${lastError}`);
@@ -1047,7 +1067,7 @@ try {
     // Launch the fingerprinted browser used to read every profile page.
     const bundle = await launchProfileBrowser({ proxyConfig, runProxySession, sessionCookie });
     browser = bundle.browser;
-    const igContext = bundle.context;
+    let igContext = bundle.context;
     log.info(`Browser ready (${bundle.authenticated ? 'logged in with your session' : 'anonymous'}).`);
 
     const summary = {
@@ -1058,6 +1078,7 @@ try {
         profilesError: 0,
         profilesBlocked: 0,
         abortedOnGate: false,
+        freshIpRetries: 0,
         invalidInputsSkipped: invalidInputs,
         totalEmailsFound: 0,
         totalPhonesFound: 0,
@@ -1077,11 +1098,30 @@ try {
     const GATE_ABORT_AFTER = 3;
     let consecutiveGated = 0;
 
+    // A login wall in anonymous mode is usually one flagged residential IP, not Instagram refusing the
+    // profile: on one sticky IP every profile failed and the run ended FAILED (3 of 3 runs on 2026-10-24;
+    // reproduced on a datacenter IP, run 6WCw2HQ6M0Hwev2qQ). A walled profile is tried again on a fresh
+    // residential IP, in a new browser because a browser must not hop IPs mid-session. Not with the
+    // user's own proxy (one IP) or a session cookie (the session is tied to the IP it logged in from).
+    const canRotateIp = Boolean(proxyConfig) && !(customProxyUrl && customProxyUrl.trim()) && !bundle.authenticated;
+    const FRESH_IPS_PER_PROFILE = 2;
+    const FRESH_IPS_PER_RUN = 6;
+
     for (let i = 0; i < cleanedUsernames.length; i += 1) {
         const username = cleanedUsernames[i];
         log.info(`[${i + 1}/${cleanedUsernames.length}] @${username}`);
 
-        const result = await fetchProfileBrowser(igContext, username, { maxRetries, requestDelayMs });
+        let result = await fetchProfileBrowser(igContext, username, { maxRetries, requestDelayMs, stopOnWall: canRotateIp });
+        for (let tries = 0; result.gated && canRotateIp && tries < FRESH_IPS_PER_PROFILE
+            && summary.freshIpRetries < FRESH_IPS_PER_RUN; tries += 1) {
+            summary.freshIpRetries += 1;
+            log.info(`[${username}] Instagram showed a login wall on this IP; trying a fresh residential IP (${summary.freshIpRetries} of up to ${FRESH_IPS_PER_RUN} this run).`);
+            await browser.close().catch(() => {});
+            ({ browser, context: igContext } = await launchProfileBrowser({
+                proxyConfig, runProxySession: safeSessionId('run', `${startedAt}-${summary.freshIpRetries}`), sessionCookie,
+            }));
+            result = await fetchProfileBrowser(igContext, username, { maxRetries, requestDelayMs, stopOnWall: true });
+        }
         if (!result.ok) {
             // Failures are recorded in the summary but NOT pushed as dataset items, so the
             // user is never charged (this actor bills per profile row) for a profile we could

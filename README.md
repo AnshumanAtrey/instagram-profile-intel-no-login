@@ -37,7 +37,7 @@ Pay-per-event:
 | Event | Price | When it fires |
 |---|---|---|
 | `Actor Start` | $0.01 | Charged when the Actor starts running. Number of events charged depends on Actor memory (one event per GB, minimum one event) |
-| `Profile Record` | $0.05 | Charged per Instagram profile scraped |
+| `Profile Record` | $0.05 | Charged per Instagram profile scraped. On paid Apify plans: $0.045 on Scale, $0.04 on Business and above |
 
 ### Typical scan costs
 

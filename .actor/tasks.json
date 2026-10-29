@@ -1,0 +1,47 @@
+{
+  "$comment": "Example tasks published on the Store by scripts/publish-tasks.mjs after every deploy (CI only). Each one is a search people type, with its own Google-indexed landing page and .md (manager/rules/SEO.md). Presets are public brand accounts, checked to exist on 2026-10-29.",
+  "options": {
+    "build": "latest",
+    "memoryMbytes": 1024,
+    "timeoutSecs": 3600
+  },
+  "tasks": [
+    {
+      "name": "instagram-email-scraper",
+      "title": "Instagram email scraper: emails and phones from business bios",
+      "description": "Get the email addresses and phone numbers that Instagram business accounts publish in their bio and bio links, with each email's mail server checked, plus followers, category and website, one row per account. No login and no cookies. Replace the example brands with the accounts you want.",
+      "input": {
+        "usernames": ["plumgoodness", "thesouledstore", "biryanibykilo"]
+      },
+      "seoTitle": "Instagram Email Scraper - Bio Emails and Phones",
+      "seoDescription": "Emails and phone numbers from Instagram business bios and bio links, MX-checked, with followers, category and website. No login, no cookies, bulk-ready.",
+      "inputSchemaFields": ["usernames", "validateEmailsViaMx", "expandMultiLinkBio"],
+      "datasetView": "profiles"
+    },
+    {
+      "name": "bulk-instagram-profile-scraper",
+      "title": "Bulk Instagram profile scraper: 25+ fields, no login",
+      "description": "Paste a list of Instagram usernames or profile links and get 25+ fields per account: name, bio, followers, following, posts, verified and business flags, category, bio links, contacts, account age, niche and cross-platform matches. Accounts that do not exist or are private are reported, not charged.",
+      "input": {
+        "usernames": ["zomato", "swiggyindia", "thesouledstore", "plumgoodness", "biryanibykilo"]
+      },
+      "seoTitle": "Bulk Instagram Profile Scraper - 25+ Fields, No Login",
+      "seoDescription": "Scrape many Instagram profiles at once: bio, followers, posts, verified, category, links, contacts and account age. No login. Missing accounts are not charged.",
+      "inputSchemaFields": ["usernames", "enrichLevel", "checkCrossPlatform"],
+      "datasetView": "profiles"
+    },
+    {
+      "name": "instagram-follower-count-checker",
+      "title": "Instagram follower count checker: followers, posts and verified",
+      "description": "Check the follower, following and post counts of Instagram accounts, with verified and business status and category, using the basic level for a quick, light run. No login. Swap in the accounts you track and schedule it to follow their growth.",
+      "input": {
+        "usernames": ["zomato", "swiggyindia"],
+        "enrichLevel": "basic"
+      },
+      "seoTitle": "Instagram Follower Count Checker - Followers and Posts",
+      "seoDescription": "Follower, following and post counts of Instagram accounts with verified and business status. No login. Schedule it to track an account's growth.",
+      "inputSchemaFields": ["usernames", "enrichLevel"],
+      "datasetView": "profiles"
+    }
+  ]
+}

@@ -9,9 +9,22 @@
     "templateId": "js-empty"
   },
   "input": "./INPUT_SCHEMA.json",
+  "output": "./output_schema.json",
   "dockerfile": "../Dockerfile",
   "storages": {
-    "dataset": "./output_schema.json"
+    "dataset": "./dataset_schema.json",
+    "keyValueStore": {
+      "actorKeyValueStoreSchemaVersion": 1,
+      "title": "Run summary",
+      "description": "The OUTPUT record: counts per outcome, every username that was not delivered with its reason, totals of contacts and links found, and the fresh IPs used.",
+      "collections": {
+        "summary": {
+          "title": "Run summary (OUTPUT)",
+          "description": "Profiles scraped, private, not found, blocked and failed, the usernames not delivered with their reasons, and run totals.",
+          "key": "OUTPUT"
+        }
+      }
+    }
   },
   "categories": [
     "SOCIAL_MEDIA",

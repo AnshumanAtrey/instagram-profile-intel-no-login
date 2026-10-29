@@ -35,14 +35,14 @@ Honest carve-outs (for trust):
 - Does it scrape posts?: No, profile-only. Chain to apify/instagram-post-scraper for posts. This actor is built for the profile dossier.
 - Does it scrape followers list?: No. Followers list requires login auth and is out of scope.
 - Will my account be banned?: No. This actor uses zero login and no account credentials - there is no account of yours at risk.
-- Does it always return every profile?: No, and it is honest about this. Instagram runs an anonymous-access gate that rate-limits IP pools; some profiles come back blocked. Residential proxy (the default) clears most of them, and blocked profiles are never charged. Private accounts return public metadata only (no posts), which is an Instagram limitation, not a defect.
+- Does it always return every profile?: No, and it is honest about this. Instagram runs an anonymous-access gate that rate-limits IP pools; some profiles come back blocked. Residential proxy (the default) clears most of them: a profile that hits a login wall is tried again on a fresh residential IP, and blocked profiles are never charged. Private accounts return public metadata only (no posts), which is an Instagram limitation, not a defect.
 
 ## Pricing
 
 PAY_PER_EVENT model:
 
 - `Actor Start`: $0.01 - Charged when the Actor starts running. Number of events charged depends on Actor memory (one event per GB, minimum one event)
-- `Profile Record`: $0.05 - Charged per Instagram profile scraped
+- `Profile Record`: $0.05 - Charged per Instagram profile scraped ($0.045 on Apify's Scale plan, $0.04 on Business and above)
 
 Typical costs:
 - Single profile: $0.06
