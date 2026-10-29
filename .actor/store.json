@@ -1,0 +1,22 @@
+{
+  "$comment": "Store listing fields that apify push never sends. Applied by scripts/store-metadata.mjs after every deploy. Title, description and categories live in actor.json (copied from the live listing on 2026-10-29, so adding the CI kit changed nothing else).",
+  "actorId": "7vOph1XrcOZzKYHCm",
+  "seoTitle": "Instagram Scraper No Login - Bio Emails + 25 Fields | Bulk",
+  "seoDescription": "Instagram profile scraper, no login no cookies. Bio emails (MX-validated), phones, multi-link bios, engagement scoring, account age, tech stack. 25+ fields per username. Bulk-ready for B2B leads.",
+  "exampleRunInput$comment": "The prefill. Until 2026-10-29 the live example was the template's { \"helloWorld\": 123 }; shaadiwish, a prefill account that no longer exists, was replaced by thesouledstore (run 2RiEJw6X0HQl1aS1s).",
+  "exampleRunInput": {
+    "usernames": [
+      "biryanibykilo",
+      "plumgoodness",
+      "thesouledstore"
+    ]
+  },
+  "actorPermissionLevel": "LIMITED_PERMISSIONS",
+  "isPublic": true,
+  "defaultRunOptions$comment": "1 GB since 2026-10-29: one shared Chromium opens and closes one page per profile, peaking at 289-338 MB (runs FzTXF3xT0fPMJkYr1, 2RiEJw6X0HQl1aS1s). The start event bills per GB, so the old 4 GB default charged every run $0.04 to start instead of $0.01.",
+  "defaultRunOptions": {
+    "build": "latest",
+    "memoryMbytes": 1024,
+    "timeoutSecs": 3600
+  }
+}
