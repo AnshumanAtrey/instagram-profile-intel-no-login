@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "instagram-profile-intel-no-login": {
+      "url": "https://mcp.apify.com?tools=anshumanatrey/instagram-profile-intel-no-login",
+      "headers": {
+        "Authorization": "Bearer <YOUR_APIFY_TOKEN>"
+      }
+    }
+  }
+}
